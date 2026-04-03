@@ -1,0 +1,87 @@
+version: "3.9"
+
+services:
+  client:
+    build:
+      context: .
+      dockerfile: docker/client.Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./client/.env
+    depends_on:
+      - server
+    networks:
+      - app-network
+
+  server:
+    build:
+      context: .
+      dockerfile: docker/server.Dockerfile
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./server/.env
+    networks:
+      - app-network
+
+  # Supabase PostgreSQL (local development)
+  supabase-db:
+    image: supabase/postgres:15.1.0.117
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - supabase_db_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # Supabase Auth (Kong Gateway)
+  supabase-kong:
+    image: kong:2.8.1
+    restart: on-failure
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    depends_on:
+      - supabase-db
+    networks:
+      - app-network
+
+  # Supabase Auth Service (GoTrue)
+  supabase-auth:
+    image: supabase/gotrue:v2.100.0
+    restart: on-failure
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:8000
+      GOTRUE_SITE_URL: http://localhost:3000
+      GOTRUE_URI_PERMITTED_DOMAINS: "*"
+      GOTRUE_JWT_SECRET: super-secret-jwt-token-at-least-32-characters-long
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_DB_DRIVER: postgres
+      DB_NAMESPACE: auth
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:postgres@supabase-db:5432/postgres
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_SMS_AUTOCONFIRM: "true"
+    depends_on:
+      - supabase-db
+    networks:
+      - app-network
+
+volumes:
+  supabase_db_data:
+
+networks:
+  app-network:
+    driver: bridge
